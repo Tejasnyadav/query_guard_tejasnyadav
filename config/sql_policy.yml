@@ -1,0 +1,225 @@
+# Phase 2 SQL safety policy. The Python validator loads this file at startup.
+
+dialect: postgres
+
+
+ 
+
+allowed_schemas:
+
+  - analytics
+
+
+ 
+
+allowed_tables:
+
+  - analytics.dataset_metadata
+
+  - analytics.customers_safe
+
+  - analytics.order_line_facts
+
+  - analytics.order_summary
+
+  - analytics.revenue_monthly_by_segment
+
+  - analytics.payment_attempts
+
+
+ 
+
+# The first version is intentionally strict. Every physical table must be written
+
+# as analytics.table_name. CTE names do not need a schema.
+
+require_schema_qualification: true
+
+forbid_select_star: true
+
+allow_recursive_cte: false
+
+allow_cross_join: false
+
+require_join_condition: true
+
+
+ 
+
+max_sql_length: 20000
+
+max_joins: 6
+
+max_subquery_depth: 4
+
+max_offset: 10000
+
+max_result_rows: 500
+
+fetch_probe_rows: 1
+
+
+ 
+
+# PostgreSQL planner limits. These are planner units, not milliseconds.
+
+# Calibrate them later using your own evaluation dataset.
+
+max_plan_cost: 100000
+
+max_plan_rows: 1000000
+
+warn_plan_cost_ratio: 0.80
+
+
+ 
+
+statement_timeout_ms: 8000
+
+lock_timeout_ms: 1000
+
+
+ 
+
+# Strict function allowlist. Add a function only after you have a test for it.
+
+function_policy: allowlist
+
+allowed_functions:
+
+  - ABS
+
+  - AVG
+
+  - CASE
+
+  - CAST
+
+  - CEIL
+
+  - CEILING
+
+  - COALESCE
+
+  - CONCAT
+
+  - COUNT
+
+  - CUME_DIST
+
+  - CURRENT_DATE
+
+  - CURRENT_TIMESTAMP
+
+  - DATE_PART
+
+  - DATE_TRUNC
+
+  - DENSE_RANK
+
+  - EXTRACT
+
+  - FIRST_VALUE
+
+  - FLOOR
+
+  - GREATEST
+
+  - IF
+
+  - LAG
+
+  - LAST_VALUE
+
+  - LEAD
+
+  - LEAST
+
+  - LOWER
+
+  - MAX
+
+  - MIN
+
+  - NTH_VALUE
+
+  - NULLIF
+
+  - PERCENT_RANK
+
+  - POWER
+
+  - RANK
+
+  - ROUND
+
+  - ROW_NUMBER
+
+  - SUBSTRING
+
+  - SUM
+
+  - TIMESTAMP_TRUNC
+
+  - TO_CHAR
+
+  - TRIM
+
+  - UPPER
+
+
+ 
+
+# These are denied even if the function policy is later relaxed.
+
+denied_functions:
+
+  - DBLINK
+
+  - LO_EXPORT
+
+  - LO_IMPORT
+
+  - NEXTVAL
+
+  - PG_ADVISORY_LOCK
+
+  - PG_ADVISORY_XACT_LOCK
+
+  - PG_CANCEL_BACKEND
+
+  - PG_READ_BINARY_FILE
+
+  - PG_READ_FILE
+
+  - PG_SLEEP
+
+  - PG_TERMINATE_BACKEND
+
+  - SET_CONFIG
+
+  - SETVAL
+
+
+ 
+
+# Defense in depth. These columns should not exist in the analytics views anyway.
+
+denied_columns:
+
+  - email
+
+  - full_name
+
+  - phone
+
+  - address
+
+  - postal_address
+
+  - payment_token
+
+  - card_number
+
+
+ 

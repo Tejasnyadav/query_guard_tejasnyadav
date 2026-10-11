@@ -1,0 +1,69 @@
+version: 1
+
+
+ 
+
+dimensions:
+
+  customer_segment:
+
+    source_view: analytics.order_line_facts
+
+    column: customer_segment
+
+    description: Customer segment effective on the order date.
+
+    allowed_values:
+
+      - SMB
+
+      - Mid-Market
+
+      - Enterprise
+
+
+ 
+
+  customer_region:
+
+    source_view: analytics.order_line_facts
+
+    column: customer_region
+
+    description: Customer region from the safe customer view.
+
+
+ 
+
+  product_category:
+
+    source_view: analytics.order_line_facts
+
+    column: category_name
+
+    description: Product category for the order line.
+
+
+ 
+
+  marketing_channel:
+
+    source_view: analytics.order_line_facts
+
+    column: marketing_channel
+
+    description: Marketing channel recorded on the order.
+
+
+ 
+
+  order_month:
+
+    source_view: analytics.order_line_facts
+
+    column: order_month
+
+    description: Calendar month in Asia/Kolkata.
+
+
+ 

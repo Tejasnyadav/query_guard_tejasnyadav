@@ -1,0 +1,124 @@
+version: 1
+
+business_timezone: Asia/Kolkata
+
+reporting_currency: INR
+
+
+ 
+
+metrics:
+
+  gross_revenue:
+
+    label: Gross revenue
+
+    description: Gross value of completed order lines before discounts and refunds.
+
+    expression: SUM(gross_amount)
+
+    source_view: analytics.order_line_facts
+
+    required_filter: order_status = 'completed'
+
+    time_column: order_date
+
+    unit: INR
+
+
+ 
+
+  net_revenue:
+
+    label: Net revenue
+
+    description: Gross value of completed order lines minus discounts and refunds associated with those lines.
+
+    expression: SUM(gross_amount - discount_amount - refund_amount)
+
+    source_view: analytics.order_line_facts
+
+    required_filter: order_status = 'completed'
+
+    time_column: order_date
+
+    unit: INR
+
+
+ 
+
+  order_count:
+
+    label: Completed orders
+
+    description: Number of distinct completed orders.
+
+    expression: COUNT(DISTINCT order_id)
+
+    source_view: analytics.order_line_facts
+
+    required_filter: order_status = 'completed'
+
+    time_column: order_date
+
+    unit: orders
+
+
+ 
+
+  active_customers:
+
+    label: Active customers
+
+    description: Distinct customers with at least one completed order in the period.
+
+    expression: COUNT(DISTINCT customer_key)
+
+    source_view: analytics.order_line_facts
+
+    required_filter: order_status = 'completed'
+
+    time_column: order_date
+
+    unit: customers
+
+
+ 
+
+  refund_amount:
+
+    label: Refund amount
+
+    description: Refund value associated with completed order lines, attributed to the original order date.
+
+    expression: SUM(refund_amount)
+
+    source_view: analytics.order_line_facts
+
+    required_filter: order_status = 'completed'
+
+    time_column: order_date
+
+    unit: INR
+
+
+ 
+
+  average_order_value:
+
+    label: Average order value
+
+    description: Net revenue divided by distinct completed orders.
+
+    expression: SUM(net_revenue) / NULLIF(COUNT(DISTINCT order_id), 0)
+
+    source_view: analytics.order_line_facts
+
+    required_filter: order_status = 'completed'
+
+    time_column: order_date
+
+    unit: INR_per_order
+
+
+ 

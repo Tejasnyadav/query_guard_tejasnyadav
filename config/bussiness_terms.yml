@@ -1,0 +1,56 @@
+version: 1
+
+
+ 
+
+terms:
+
+  revenue:
+
+    clarification_required: true
+
+    choices:
+
+      - gross_revenue
+
+      - net_revenue
+
+    explanation: Revenue can mean gross value or value after discounts and refunds.
+
+
+ 
+
+  last_month:
+
+    definition: Previous complete calendar month in Asia/Kolkata.
+
+
+ 
+
+  previous_month:
+
+    definition: Complete calendar month immediately before the selected month.
+
+
+ 
+
+  contributed_most_to_decline:
+
+    definition: Segment with the most negative absolute change in the selected metric.
+
+
+ 
+
+  customer_segment:
+
+    definition: Segment effective on the transaction date, not the customer's current segment.
+
+
+ 
+
+  why:
+
+    limitation: Descriptive driver analysis only. Do not claim causation without a causal study.
+
+
+ 
