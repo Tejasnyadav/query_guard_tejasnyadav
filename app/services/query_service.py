@@ -13,6 +13,8 @@ from app.schemas.query import ExecuteSqlRequest, QueryExecutionOutcome
 
 from app.sql.executor import WarehouseExecutor
 
+from app.sql.models import SqlValidationResult, ValidationIssue
+
 from app.sql.plan_guard import PlanGuard
 
 from app.sql.validator import SqlValidator
@@ -54,12 +56,65 @@ class QueryService:
 
         run_id = self.audit.create_run(request.question)
 
+        return self._execute_for_run(
+
+            run_id=run_id,
+
+            request=request,
+
+            manage_run_lifecycle=True,
+
+        )
+
 
  
+
+    def execute_for_run(
+
+        self,
+
+        *,
+
+        run_id,
+
+        request: ExecuteSqlRequest,
+
+    ) -> QueryExecutionOutcome:
+
+        """Execute under an existing analysis run created by the LangGraph workflow."""
+
+        return self._execute_for_run(
+
+            run_id=run_id,
+
+            request=request,
+
+            manage_run_lifecycle=False,
+
+        )
+
+
+ 
+
+    def _execute_for_run(
+
+        self,
+
+        *,
+
+        run_id,
+
+        request: ExecuteSqlRequest,
+
+        manage_run_lifecycle: bool,
+
+    ) -> QueryExecutionOutcome:
 
         validation_started = perf_counter()
 
         validation = self.validator.validate(request.sql)
+
+        validation = self._apply_request_contract(validation, request)
 
         validation_duration_ms = self._elapsed_ms(validation_started)
 
@@ -96,7 +151,7 @@ class QueryService:
 
             run_id=run_id,
 
-            sequence_number=1,
+            sequence_number=None,
 
             graph_node="validate_sql",
 
@@ -145,7 +200,7 @@ class QueryService:
 
             )
 
-            self.audit.finish_run(run_id, "rejected")
+            self._finish_run_if_managed(run_id, "rejected", manage_run_lifecycle)
 
             return QueryExecutionOutcome(
 
@@ -182,7 +237,7 @@ class QueryService:
 
                 run_id=run_id,
 
-                sequence_number=2,
+                sequence_number=None,
 
                 graph_node="estimate_query_cost",
 
@@ -218,7 +273,7 @@ class QueryService:
 
             )
 
-            self.audit.finish_run(run_id, run_status)
+            self._finish_run_if_managed(run_id, run_status, manage_run_lifecycle)
 
             return QueryExecutionOutcome(
 
@@ -246,7 +301,7 @@ class QueryService:
 
                 run_id=run_id,
 
-                sequence_number=2,
+                sequence_number=None,
 
                 graph_node="estimate_query_cost",
 
@@ -280,7 +335,7 @@ class QueryService:
 
             )
 
-            self.audit.finish_run(run_id, "failed")
+            self._finish_run_if_managed(run_id, "failed", manage_run_lifecycle)
 
             return QueryExecutionOutcome(
 
@@ -307,7 +362,7 @@ class QueryService:
 
             run_id=run_id,
 
-            sequence_number=2,
+            sequence_number=None,
 
             graph_node="estimate_query_cost",
 
@@ -350,7 +405,7 @@ class QueryService:
 
             error_message = "; ".join(plan.rejection_reasons)
 
-            self.audit.finish_run(run_id, "rejected")
+            self._finish_run_if_managed(run_id, "rejected", manage_run_lifecycle)
 
             return QueryExecutionOutcome(
 
@@ -387,7 +442,7 @@ class QueryService:
 
                 run_id=run_id,
 
-                sequence_number=3,
+                sequence_number=None,
 
                 graph_node="execute_sql",
 
@@ -423,7 +478,7 @@ class QueryService:
 
             )
 
-            self.audit.finish_run(run_id, run_status)
+            self._finish_run_if_managed(run_id, run_status, manage_run_lifecycle)
 
             return QueryExecutionOutcome(
 
@@ -460,6 +515,84 @@ class QueryService:
 
         )
 
+
+ 
+
+        if request.expected_columns is not None and result.columns != request.expected_columns:
+
+            error_message = (
+
+                "The query result columns did not match the Analyst's validated contract. "
+
+                f"Expected {request.expected_columns}; received {result.columns}."
+
+            )
+
+            self.audit.finish_query(
+
+                query_id=query_id,
+
+                execution_status="result_schema_rejected",
+
+                row_count=result.returned_row_count,
+
+                duration_ms=result.duration_ms,
+
+                truncated=result.truncated,
+
+                error_code="RESULT_SCHEMA_MISMATCH",
+
+                error_message=error_message,
+
+            )
+
+            self.audit.log_tool_call(
+
+                run_id=run_id,
+
+                sequence_number=None,
+
+                graph_node="execute_sql",
+
+                tool_name="warehouse_query",
+
+                status="rejected",
+
+                input_hash=sha256_text(validation.executable_sql),
+
+                output_reference=(
+
+                    f"query_id={query_id}; error_code=RESULT_SCHEMA_MISMATCH"
+
+                ),
+
+                duration_ms=result.duration_ms,
+
+            )
+
+            self._finish_run_if_managed(run_id, "rejected", manage_run_lifecycle)
+
+            return QueryExecutionOutcome(
+
+                status="rejected",
+
+                run_id=run_id,
+
+                query_id=query_id,
+
+                validation=validation,
+
+                plan=plan,
+
+                error_code="RESULT_SCHEMA_MISMATCH",
+
+                error_message=error_message,
+
+            )
+
+
+ 
+
         self.audit.finish_query(
 
             query_id=query_id,
@@ -478,7 +611,7 @@ class QueryService:
 
             run_id=run_id,
 
-            sequence_number=3,
+            sequence_number=None,
 
             graph_node="execute_sql",
 
@@ -500,7 +633,7 @@ class QueryService:
 
         )
 
-        self.audit.finish_run(run_id, "completed")
+        self._finish_run_if_managed(run_id, "completed", manage_run_lifecycle)
 
 
  
@@ -520,6 +653,84 @@ class QueryService:
             result=result,
 
         )
+
+
+ 
+
+    @staticmethod
+
+    def _apply_request_contract(
+
+        validation: SqlValidationResult,
+
+        request: ExecuteSqlRequest,
+
+    ) -> SqlValidationResult:
+
+        if not validation.accepted or request.expected_tables is None:
+
+            return validation
+
+
+ 
+
+        expected_tables = set(request.expected_tables)
+
+        actual_tables = set(validation.tables)
+
+        if actual_tables == expected_tables:
+
+            return validation
+
+
+ 
+
+        issue = ValidationIssue(
+
+            code="SQL_TABLE_CONTRACT_MISMATCH",
+
+            message=(
+
+                "The SQL referenced a different table set than the Analyst declared. "
+
+                f"Expected {sorted(expected_tables)}; received {sorted(actual_tables)}."
+
+            ),
+
+        )
+
+        return validation.model_copy(
+
+            update={
+
+                "accepted": False,
+
+                "executable_sql": None,
+
+                "issues": [*validation.issues, issue],
+
+            }
+
+        )
+
+
+ 
+
+    def _finish_run_if_managed(
+
+        self,
+
+        run_id,
+
+        status: str,
+
+        manage_run_lifecycle: bool,
+
+    ) -> None:
+
+        if manage_run_lifecycle:
+
+            self.audit.finish_run(run_id, status)
 
 
  

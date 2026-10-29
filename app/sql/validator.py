@@ -822,6 +822,10 @@ class SqlValidator:
 
         for function in statement.find_all(function_type):
 
+            if isinstance(function,(exp.And,exp.Or,exp.Not)):
+
+                continue
+
             function_name = self._function_name(function)
 
             if not function_name:

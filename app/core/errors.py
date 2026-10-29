@@ -31,5 +31,11 @@ class AuditStorageError(RuntimeError):
 
     """Raised when QueryGuard cannot write the mandatory audit record."""
 
+@dataclass
+class AgentWorkflowError(Exception):
+    code:str
+    message:str
+    retryable:bool=False
 
- 
+    def __str__(self)->str:
+        return self.message

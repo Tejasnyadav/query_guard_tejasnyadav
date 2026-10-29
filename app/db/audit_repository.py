@@ -33,26 +33,126 @@ class AuditRepository:
 
  
 
-    def create_run(self, question: str) -> UUID:
+    def create_run(self, question: str, thread_id: str | None = None) -> UUID:
 
         sql = """
 
-            INSERT INTO queryguard.analysis_runs (question, status)
+            INSERT INTO queryguard.analysis_runs (question, status, thread_id)
 
-            VALUES (%s, 'running')
+            VALUES (%s, 'running', %s)
 
             RETURNING run_id
 
         """
 
-        row = self._fetch_one(sql, (question,))
+        row = self._fetch_one(sql, (question, thread_id))
 
         return row["run_id"]
 
 
  
 
-    def finish_run(self, run_id: UUID, status: str) -> None:
+    def update_run_context(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        normalized_question: str | None = None,
+
+        selected_metric_ids: list[str] | None = None,
+
+        selected_dimension_ids: list[str] | None = None,
+
+        assumptions: list[str] | None = None,
+
+        current_node: str | None = None,
+
+    ) -> None:
+
+        self._execute(
+
+            """
+
+                UPDATE queryguard.analysis_runs
+
+                SET normalized_question = COALESCE(%s, normalized_question),
+
+                    selected_metric_ids = COALESCE(%s, selected_metric_ids),
+
+                    selected_dimension_ids = COALESCE(%s, selected_dimension_ids),
+
+                    assumptions = COALESCE(%s, assumptions),
+
+                    current_node = COALESCE(%s, current_node)
+
+                WHERE run_id = %s
+
+            """,
+
+            (
+
+                normalized_question,
+
+                Jsonb(selected_metric_ids) if selected_metric_ids is not None else None,
+
+                Jsonb(selected_dimension_ids) if selected_dimension_ids is not None else None,
+
+                Jsonb(assumptions) if assumptions is not None else None,
+
+                current_node,
+
+                run_id,
+
+            ),
+
+        )
+
+
+ 
+
+    def set_run_status(self, run_id: UUID, status: str, current_node: str | None = None) -> None:
+
+        self._execute(
+
+            """
+
+                UPDATE queryguard.analysis_runs
+
+                SET status = %s,
+
+                    current_node = COALESCE(%s, current_node),
+
+                    completed_at = NULL
+
+                WHERE run_id = %s
+
+            """,
+
+            (status, current_node, run_id),
+
+        )
+
+
+ 
+
+    def finish_run(
+
+        self,
+
+        run_id: UUID,
+
+        status: str,
+
+        *,
+
+        error_code: str | None = None,
+
+        error_message: str | None = None,
+
+    ) -> None:
 
         completed_at: datetime | None = (
 
@@ -68,13 +168,17 @@ class AuditRepository:
 
                 SET status = %s,
 
-                    completed_at = %s
+                    completed_at = %s,
+
+                    error_code = %s,
+
+                    error_message = %s
 
                 WHERE run_id = %s
 
             """,
 
-            (status, completed_at, run_id),
+            (status, completed_at, error_code, error_message, run_id),
 
         )
 
@@ -210,19 +314,7 @@ class AuditRepository:
 
             """,
 
-            (
-
-                Jsonb(plan_summary),
-
-                execution_status,
-
-                error_code,
-
-                error_message,
-
-                query_id,
-
-            ),
+            (Jsonb(plan_summary), execution_status, error_code, error_message, query_id),
 
         )
 
@@ -346,19 +438,7 @@ class AuditRepository:
 
             """,
 
-            (
-
-                query_id,
-
-                Jsonb(columns),
-
-                Jsonb(rows),
-
-                returned_row_count,
-
-                truncated,
-
-            ),
+            (query_id, Jsonb(columns), Jsonb(rows), returned_row_count, truncated),
 
         )
 
@@ -373,8 +453,6 @@ class AuditRepository:
 
         run_id: UUID,
 
-        sequence_number: int,
-
         graph_node: str,
 
         tool_name: str,
@@ -387,17 +465,65 @@ class AuditRepository:
 
         duration_ms: int | None,
 
+        sequence_number: int | None = None,
+
     ) -> None:
 
-        self._execute(
+        if sequence_number is None:
 
-            """
+            self._execute(
 
-                INSERT INTO queryguard.tool_calls (
+                """
+
+                    WITH acquired_lock AS (
+
+                        SELECT pg_advisory_xact_lock(hashtext(%s))
+
+                    ),
+
+                    next_sequence AS (
+
+                        SELECT COALESCE(MAX(sequence_number), 0) + 1 AS value
+
+                        FROM queryguard.tool_calls
+
+                        WHERE run_id = %s
+
+                    )
+
+                    INSERT INTO queryguard.tool_calls (
+
+                        run_id,
+
+                        sequence_number,
+
+                        graph_node,
+
+                        tool_name,
+
+                        status,
+
+                        input_hash,
+
+                        output_reference,
+
+                        duration_ms
+
+                    )
+
+                    SELECT %s, next_sequence.value, %s, %s, %s, %s, %s, %s
+
+                    FROM next_sequence, acquired_lock
+
+                """,
+
+                (
+
+                    str(run_id),
 
                     run_id,
 
-                    sequence_number,
+                    run_id,
 
                     graph_node,
 
@@ -409,7 +535,26 @@ class AuditRepository:
 
                     output_reference,
 
-                    duration_ms
+                    duration_ms,
+
+                ),
+
+            )
+
+            return
+
+
+ 
+
+        self._execute(
+
+            """
+
+                INSERT INTO queryguard.tool_calls (
+
+                    run_id, sequence_number, graph_node, tool_name, status,
+
+                    input_hash, output_reference, duration_ms
 
                 )
 
@@ -442,15 +587,257 @@ class AuditRepository:
 
  
 
+    def log_model_call(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        graph_node: str,
+
+        model_name: str,
+
+        prompt_version: str,
+
+        input_hash: str,
+
+        output_payload: dict[str, Any] | None,
+
+        input_tokens: int | None,
+
+        output_tokens: int | None,
+
+        total_tokens: int | None,
+
+        duration_ms: int | None,
+
+        status: str,
+
+        error_message: str | None = None,
+
+    ) -> None:
+
+        self._execute(
+
+            """
+
+                INSERT INTO queryguard.model_calls (
+
+                    run_id, graph_node, model_name, prompt_version, input_hash,
+
+                    output_payload, input_tokens, output_tokens, total_tokens,
+
+                    duration_ms, status, error_message
+
+                )
+
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+
+            """,
+
+            (
+
+                run_id,
+
+                graph_node,
+
+                model_name,
+
+                prompt_version,
+
+                input_hash,
+
+                Jsonb(output_payload) if output_payload is not None else None,
+
+                input_tokens,
+
+                output_tokens,
+
+                total_tokens,
+
+                duration_ms,
+
+                status,
+
+                error_message,
+
+            ),
+
+        )
+
+
+ 
+
+    def save_artifact(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        artifact_type: str,
+
+        payload: dict[str, Any],
+
+        artifact_version: int = 1,
+
+    ) -> None:
+
+        self._execute(
+
+            """
+
+                INSERT INTO queryguard.analysis_artifacts (
+
+                    run_id, artifact_type, artifact_version, payload
+
+                )
+
+                VALUES (%s, %s, %s, %s)
+
+                ON CONFLICT (run_id, artifact_type, artifact_version) DO UPDATE
+
+                SET payload = EXCLUDED.payload,
+
+                    created_at = now()
+
+            """,
+
+            (run_id, artifact_type, artifact_version, Jsonb(payload)),
+
+        )
+
+
+ 
+
+    def upsert_clarification(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        question: str,
+
+        options: list[dict[str, Any]],
+
+    ) -> None:
+
+        self._execute(
+
+            """
+
+                INSERT INTO queryguard.clarifications (
+
+                    run_id, question, options, status
+
+                )
+
+                VALUES (%s, %s, %s, 'pending')
+
+                ON CONFLICT (run_id) DO UPDATE
+
+                SET question = EXCLUDED.question,
+
+                    options = EXCLUDED.options,
+
+                    selected_choice_id = NULL,
+
+                    status = 'pending',
+
+                    answered_at = NULL
+
+            """,
+
+            (run_id, question, Jsonb(options)),
+
+        )
+
+
+ 
+
+    def answer_clarification(self, *, run_id: UUID, choice_id: str) -> None:
+
+        self._execute(
+
+            """
+
+                UPDATE queryguard.clarifications
+
+                SET selected_choice_id = %s,
+
+                    status = 'answered',
+
+                    answered_at = now()
+
+                WHERE run_id = %s
+
+            """,
+
+            (choice_id, run_id),
+
+        )
+
+
+ 
+
+    def get_pending_clarification(self, run_id: UUID) -> dict[str, Any] | None:
+
+        return self._fetch_optional(
+
+            """
+
+                SELECT clarification_id, run_id, question, options, status, created_at
+
+                FROM queryguard.clarifications
+
+                WHERE run_id = %s AND status = 'pending'
+
+            """,
+
+            (run_id,),
+
+        )
+
+
+ 
+
+    def get_thread_id(self, run_id: UUID) -> str | None:
+
+        row = self._fetch_optional(
+
+            "SELECT thread_id FROM queryguard.analysis_runs WHERE run_id = %s",
+
+            (run_id,),
+
+        )
+
+        if row is None:
+
+            return None
+
+        value = row.get("thread_id")
+
+        return str(value) if value is not None else None
+
+
+ 
+
     def get_run(self, run_id: UUID) -> dict[str, Any] | None:
 
         run = self._fetch_optional(
 
             """
 
-                SELECT run_id, question, status, selected_metric_ids, assumptions,
+                SELECT run_id, thread_id, question, normalized_question, status,
 
-                       created_at, completed_at
+                       selected_metric_ids, selected_dimension_ids, assumptions,
+
+                       current_node, error_code, error_message, created_at, completed_at
 
                 FROM queryguard.analysis_runs
 
@@ -468,6 +855,64 @@ class AuditRepository:
 
 
  
+
+        run["clarification"] = self._fetch_optional(
+
+            """
+
+                SELECT clarification_id, question, options, selected_choice_id,
+
+                       status, created_at, answered_at
+
+                FROM queryguard.clarifications
+
+                WHERE run_id = %s
+
+            """,
+
+            (run_id,),
+
+        )
+
+        run["artifacts"] = self._fetch_all(
+
+            """
+
+                SELECT artifact_id, artifact_type, artifact_version, payload, created_at
+
+                FROM queryguard.analysis_artifacts
+
+                WHERE run_id = %s
+
+                ORDER BY created_at
+
+            """,
+
+            (run_id,),
+
+        )
+
+        run["model_calls"] = self._fetch_all(
+
+            """
+
+                SELECT model_call_id, graph_node, model_name, prompt_version,
+
+                       input_hash, input_tokens, output_tokens, total_tokens,
+
+                       duration_ms, status, error_message, created_at
+
+                FROM queryguard.model_calls
+
+                WHERE run_id = %s
+
+                ORDER BY created_at
+
+            """,
+
+            (run_id,),
+
+        )
 
         run["tool_calls"] = self._fetch_all(
 

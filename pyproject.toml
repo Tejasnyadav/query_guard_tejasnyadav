@@ -1,6 +1,6 @@
 [project]
 name = "queryguard"
-version = "0.2.0"
+version = "0.3.0"
 description = "Trustworthy local business analytics agent"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -11,6 +11,11 @@ dependencies = [
    "pydantic-settings>=2.6,<3",
    "sqlglot==30.20.0",
    "pyyaml>=6,<7",
+   "langgraph>=1.2.12,<2",
+   "langgraph-checkpoint-postgres>=3,<4",
+   "langchain-openai>=1.6,<2",
+   "langsmith>=0.14.12",
+   "python-dotenv>=1.2.4",
 ]
 
 [dependency-groups]
@@ -26,6 +31,7 @@ dev = [
 testpaths = ["tests"]
 markers = [
    "integration: requires the local PostgreSQL databases",
+   "openai: requires a valid OPENAI_API_KEY and makes paid API calls",
 ]
 
 [tool.ruff]
