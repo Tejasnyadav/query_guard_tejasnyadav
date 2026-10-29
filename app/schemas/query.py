@@ -32,6 +32,10 @@ class ExecuteSqlRequest(BaseModel):
 
     sql: str = Field(min_length=1, max_length=50_000)
 
+    expected_tables: list[str] | None = None
+
+    expected_columns: list[str] | None = None
+
 
 
  
