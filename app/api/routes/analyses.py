@@ -100,4 +100,48 @@ def get_analysis(
     return run
 
 
+
+ 
+
+@router.get("/analyses/{run_id}/claims")
+
+def get_analysis_claims(
+
+    run_id: UUID,
+
+    repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+
+) -> dict[str, Any]:
+
+    run = repository.get_run(run_id)
+
+    if run is None:
+
+        raise HTTPException(status_code=404, detail="Analysis run not found.")
+
+    return {"run_id": run_id, "claims": repository.get_claims_for_run(run_id)}
+
+
+
+ 
+
+@router.get("/claims/{claim_id}")
+
+def get_claim(
+
+    claim_id: UUID,
+
+    repository: Annotated[AuditRepository, Depends(get_audit_repository)],
+
+) -> dict[str, Any]:
+
+    claim = repository.get_claim(claim_id)
+
+    if claim is None:
+
+        raise HTTPException(status_code=404, detail="Claim not found.")
+
+    return claim
+
+
  

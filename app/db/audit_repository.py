@@ -138,6 +138,45 @@ class AuditRepository:
 
  
 
+    def update_verification_status(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        verification_status: str,
+
+        repair_attempts: int | None = None,
+
+        current_node: str | None = None,
+
+    ) -> None:
+
+        self._execute(
+
+            """
+
+                UPDATE queryguard.analysis_runs
+
+                SET verification_status = %s,
+
+                    verification_repair_attempts = COALESCE(%s, verification_repair_attempts),
+
+                    current_node = COALESCE(%s, current_node)
+
+                WHERE run_id = %s
+
+            """,
+
+            (verification_status, repair_attempts, current_node, run_id),
+
+        )
+
+
+ 
+
     def finish_run(
 
         self,
@@ -211,6 +250,12 @@ class AuditRepository:
 
         functions_used: list[str],
 
+        query_role: str = "manual",
+
+        parent_query_id: UUID | None = None,
+
+        candidate_key: str | None = None,
+
     ) -> UUID:
 
         row = self._fetch_one(
@@ -237,11 +282,17 @@ class AuditRepository:
 
                     tables_used,
 
-                    functions_used
+                    functions_used,
+
+                    query_role,
+
+                    parent_query_id,
+
+                    candidate_key
 
                 )
 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 
                 RETURNING query_id
 
@@ -268,6 +319,12 @@ class AuditRepository:
                 Jsonb(tables_used),
 
                 Jsonb(functions_used),
+
+                query_role,
+
+                parent_query_id,
+
+                candidate_key,
 
             ),
 
@@ -785,6 +842,535 @@ class AuditRepository:
 
  
 
+    def save_verifier_review(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        review_version: int,
+
+        analyst_query_id: UUID,
+
+        decision: str,
+
+        summary: str,
+
+        independence_strategy: str,
+
+        issues: list[dict[str, Any]],
+
+        checks: list[dict[str, Any]],
+
+    ) -> UUID:
+
+        row = self._fetch_one(
+
+            """
+
+                INSERT INTO queryguard.verifier_reviews (
+
+                    run_id, review_version, analyst_query_id, decision, summary,
+
+                    independence_strategy, issues, checks
+
+                )
+
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+
+                ON CONFLICT (run_id, review_version) DO UPDATE
+
+                SET analyst_query_id = EXCLUDED.analyst_query_id,
+
+                    decision = EXCLUDED.decision,
+
+                    summary = EXCLUDED.summary,
+
+                    independence_strategy = EXCLUDED.independence_strategy,
+
+                    issues = EXCLUDED.issues,
+
+                    checks = EXCLUDED.checks,
+
+                    created_at = now()
+
+                RETURNING review_id
+
+            """,
+
+            (
+
+                run_id,
+
+                review_version,
+
+                analyst_query_id,
+
+                decision,
+
+                summary,
+
+                independence_strategy,
+
+                Jsonb(issues),
+
+                Jsonb(checks),
+
+            ),
+
+        )
+
+        return row["review_id"]
+
+
+ 
+
+    def save_reconciliation(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        reconciliation_version: int,
+
+        analyst_query_id: UUID,
+
+        verifier_query_id: UUID,
+
+        status: str,
+
+        comparisons: list[dict[str, Any]],
+
+        issues: list[str],
+
+    ) -> UUID:
+
+        row = self._fetch_one(
+
+            """
+
+                INSERT INTO queryguard.reconciliation_results (
+
+                    run_id, reconciliation_version, analyst_query_id, verifier_query_id,
+
+                    status, comparisons, issues
+
+                )
+
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+
+                ON CONFLICT (run_id, reconciliation_version) DO UPDATE
+
+                SET analyst_query_id = EXCLUDED.analyst_query_id,
+
+                    verifier_query_id = EXCLUDED.verifier_query_id,
+
+                    status = EXCLUDED.status,
+
+                    comparisons = EXCLUDED.comparisons,
+
+                    issues = EXCLUDED.issues,
+
+                    created_at = now()
+
+                RETURNING reconciliation_id
+
+            """,
+
+            (
+
+                run_id,
+
+                reconciliation_version,
+
+                analyst_query_id,
+
+                verifier_query_id,
+
+                status,
+
+                Jsonb(comparisons),
+
+                Jsonb(issues),
+
+            ),
+
+        )
+
+        return row["reconciliation_id"]
+
+
+ 
+
+    def clear_claims(self, run_id: UUID) -> None:
+
+        self._execute("DELETE FROM queryguard.claims WHERE run_id = %s", (run_id,))
+
+
+ 
+
+    def replace_verified_claims(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        claims: list[dict[str, Any]],
+
+    ) -> list[UUID]:
+
+        """Replace a run's entire claim ledger in one database transaction.
+
+
+ 
+
+        A verifier run must never expose a half-written ledger. If any claim or source insert
+
+        fails, the connection context rolls back the delete and every insert together.
+
+        """
+
+
+ 
+
+        try:
+
+            with self.pool.connection() as connection:
+
+                with connection.cursor(row_factory=dict_row) as cursor:
+
+                    cursor.execute(
+
+                        "DELETE FROM queryguard.claims WHERE run_id = %s",
+
+                        (run_id,),
+
+                    )
+
+                    claim_ids: list[UUID] = []
+
+                    for claim in claims:
+
+                        cursor.execute(
+
+                            """
+
+                                INSERT INTO queryguard.claims (
+
+                                    run_id, claim_key, statement_text, metric_id, value_type,
+
+                                    numeric_value, text_value, unit, display_value, calculation,
+
+                                    verification_status, source_check_id, importance
+
+                                )
+
+                                VALUES (
+
+                                    %s, %s, %s, %s, %s, %s, %s,
+
+                                    %s, %s, %s, %s, %s, %s
+
+                                )
+
+                                RETURNING claim_id
+
+                            """,
+
+                            (
+
+                                run_id,
+
+                                claim["claim_key"],
+
+                                claim["statement_text"],
+
+                                claim["metric_id"],
+
+                                claim["value_type"],
+
+                                claim.get("numeric_value"),
+
+                                claim.get("text_value"),
+
+                                claim["unit"],
+
+                                claim["display_value"],
+
+                                claim.get("calculation"),
+
+                                claim["verification_status"],
+
+                                claim["source_check_id"],
+
+                                claim["importance"],
+
+                            ),
+
+                        )
+
+                        row = cursor.fetchone()
+
+                        if row is None:
+
+                            raise AuditStorageError("Claim insert returned no claim_id.")
+
+                        claim_id = row["claim_id"]
+
+                        claim_ids.append(claim_id)
+
+
+ 
+
+                        for source in claim["sources"]:
+
+                            cursor.execute(
+
+                                """
+
+                                    INSERT INTO queryguard.claim_sources (
+
+                                        claim_id, query_id, result_reference
+
+                                    )
+
+                                    VALUES (%s, %s, %s)
+
+                                """,
+
+                                (
+
+                                    claim_id,
+
+                                    source["query_id"],
+
+                                    Jsonb(source["result_reference"]),
+
+                                ),
+
+                            )
+
+                    return claim_ids
+
+        except AuditStorageError:
+
+            raise
+
+        except (PoolTimeout, psycopg.Error, KeyError, TypeError) as exc:
+
+            raise AuditStorageError("Could not replace the verified claim ledger.") from exc
+
+
+ 
+
+    def create_verified_claim(
+
+        self,
+
+        *,
+
+        run_id: UUID,
+
+        claim_key: str,
+
+        statement_text: str,
+
+        metric_id: str,
+
+        value_type: str,
+
+        numeric_value: str | None,
+
+        text_value: str | None,
+
+        unit: str,
+
+        display_value: str,
+
+        calculation: str | None,
+
+        verification_status: str,
+
+        source_check_id: str,
+
+        importance: str,
+
+    ) -> UUID:
+
+        row = self._fetch_one(
+
+            """
+
+                INSERT INTO queryguard.claims (
+
+                    run_id, claim_key, statement_text, metric_id, value_type,
+
+                    numeric_value, text_value, unit, display_value, calculation,
+
+                    verification_status, source_check_id, importance
+
+                )
+
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+
+                RETURNING claim_id
+
+            """,
+
+            (
+
+                run_id, claim_key, statement_text, metric_id, value_type, numeric_value,
+
+                text_value, unit, display_value, calculation, verification_status,
+
+                source_check_id, importance,
+
+            ),
+
+        )
+
+        return row["claim_id"]
+
+
+ 
+
+    def add_claim_source(
+
+        self,
+
+        *,
+
+        claim_id: UUID,
+
+        query_id: UUID,
+
+        result_reference: dict[str, Any],
+
+    ) -> None:
+
+        self._execute(
+
+            """
+
+                INSERT INTO queryguard.claim_sources (claim_id, query_id, result_reference)
+
+                VALUES (%s, %s, %s)
+
+                ON CONFLICT DO NOTHING
+
+            """,
+
+            (claim_id, query_id, Jsonb(result_reference)),
+
+        )
+
+
+ 
+
+    def get_claims_for_run(self, run_id: UUID) -> list[dict[str, Any]]:
+
+        claims = self._fetch_all(
+
+            """
+
+                SELECT claim_id, run_id, claim_key, statement_text, metric_id, value_type,
+
+                       numeric_value, text_value, unit, display_value, calculation,
+
+                       verification_status, source_check_id, importance, created_at
+
+                FROM queryguard.claims
+
+                WHERE run_id = %s
+
+                ORDER BY CASE importance WHEN 'primary' THEN 0 ELSE 1 END, created_at
+
+            """,
+
+            (run_id,),
+
+        )
+
+        for claim in claims:
+
+            claim["sources"] = self._fetch_all(
+
+                """
+
+                    SELECT query_id, result_reference
+
+                    FROM queryguard.claim_sources
+
+                    WHERE claim_id = %s
+
+                    ORDER BY query_id
+
+                """,
+
+                (claim["claim_id"],),
+
+            )
+
+        return claims
+
+
+ 
+
+    def get_claim(self, claim_id: UUID) -> dict[str, Any] | None:
+
+        claim = self._fetch_optional(
+
+            """
+
+                SELECT claim_id, run_id, claim_key, statement_text, metric_id, value_type,
+
+                       numeric_value, text_value, unit, display_value, calculation,
+
+                       verification_status, source_check_id, importance, created_at
+
+                FROM queryguard.claims
+
+                WHERE claim_id = %s
+
+            """,
+
+            (claim_id,),
+
+        )
+
+        if claim is None:
+
+            return None
+
+        claim["sources"] = self._fetch_all(
+
+            """
+
+                SELECT query_id, result_reference
+
+                FROM queryguard.claim_sources
+
+                WHERE claim_id = %s
+
+                ORDER BY query_id
+
+            """,
+
+            (claim_id,),
+
+        )
+
+        return claim
+
+
+ 
+
     def get_pending_clarification(self, run_id: UUID) -> dict[str, Any] | None:
 
         return self._fetch_optional(
@@ -837,7 +1423,9 @@ class AuditRepository:
 
                        selected_metric_ids, selected_dimension_ids, assumptions,
 
-                       current_node, error_code, error_message, created_at, completed_at
+                       current_node, verification_status, verification_repair_attempts,
+
+                       error_code, error_message, created_at, completed_at
 
                 FROM queryguard.analysis_runs
 
@@ -938,11 +1526,13 @@ class AuditRepository:
 
             """
 
-                SELECT query_id, purpose, sql_hash, validation_status, execution_status,
+                SELECT query_id, query_role, parent_query_id, candidate_key, purpose,
 
-                       row_count, duration_ms, truncated, tables_used, functions_used,
+                       sql_hash, validation_status, execution_status, row_count, duration_ms,
 
-                       plan_summary, error_code, error_message, created_at
+                       truncated, tables_used, functions_used, plan_summary, error_code,
+
+                       error_message, created_at
 
                 FROM queryguard.query_executions
 
@@ -956,6 +1546,48 @@ class AuditRepository:
 
         )
 
+        run["verifier_reviews"] = self._fetch_all(
+
+            """
+
+                SELECT review_id, review_version, analyst_query_id, decision, summary,
+
+                       independence_strategy, issues, checks, created_at
+
+                FROM queryguard.verifier_reviews
+
+                WHERE run_id = %s
+
+                ORDER BY review_version
+
+            """,
+
+            (run_id,),
+
+        )
+
+        run["reconciliations"] = self._fetch_all(
+
+            """
+
+                SELECT reconciliation_id, reconciliation_version, analyst_query_id,
+
+                       verifier_query_id, status, comparisons, issues, created_at
+
+                FROM queryguard.reconciliation_results
+
+                WHERE run_id = %s
+
+                ORDER BY reconciliation_version
+
+            """,
+
+            (run_id,),
+
+        )
+
+        run["claims"] = self.get_claims_for_run(run_id)
+
         return run
 
 
@@ -967,9 +1599,11 @@ class AuditRepository:
 
             """
 
-                SELECT query_id, run_id, purpose, sql_text, normalized_sql, executable_sql,
+                SELECT query_id, run_id, query_role, parent_query_id, candidate_key,
 
-                       sql_hash, validation_status, execution_status, row_count, duration_ms,
+                       purpose, sql_text, normalized_sql, executable_sql, sql_hash,
+
+                       validation_status, execution_status, row_count, duration_ms,
 
                        truncated, tables_used, functions_used, plan_summary,
 
