@@ -30,11 +30,19 @@ class Settings(BaseSettings):
 
     openai_analyst_model: str = "gpt-5.4-mini"
 
+    openai_verifier_model: str | None = None
+
     openai_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] = (
 
         "medium"
 
     )
+
+    openai_verifier_reasoning_effort: Literal[
+
+        "none", "low", "medium", "high", "xhigh"
+
+    ] = "high"
 
     openai_timeout_seconds: int = Field(default=90, ge=10, le=600)
 
@@ -79,6 +87,12 @@ class Settings(BaseSettings):
     pool_wait_timeout_seconds: int = Field(default=10, ge=1, le=120)
 
     max_sql_repair_attempts: int = Field(default=2, ge=0, le=5)
+
+    max_verifier_sql_repair_attempts: int = Field(default=2, ge=0, le=5)
+
+    max_verification_repair_attempts: int = Field(default=1, ge=0, le=2)
+
+    max_verification_checks: int = Field(default=5, ge=1, le=10)
 
 
  

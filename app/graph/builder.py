@@ -51,7 +51,27 @@ def build_analysis_graph(
 
     builder.add_node("repair_sql", nodes.repair_sql)
 
-    builder.add_node("summarize_result", nodes.summarize_result)
+
+ 
+
+    builder.add_node("inspect_anomalies", nodes.inspect_anomalies)
+
+    builder.add_node("review_methodology", nodes.review_methodology)
+
+    builder.add_node("generate_verification_sql", nodes.generate_verification_sql)
+
+    builder.add_node("execute_verification_sql", nodes.execute_verification_sql)
+
+    builder.add_node("repair_verification_sql", nodes.repair_verification_sql)
+
+    builder.add_node("reconcile_results", nodes.reconcile_results)
+
+    builder.add_node("repair_analyst_from_verifier", nodes.repair_analyst_from_verifier)
+
+    builder.add_node("build_claim_ledger", nodes.build_claim_ledger)
+
+
+ 
 
     builder.add_node("finalize_success", nodes.finalize_success)
 
@@ -100,7 +120,7 @@ def build_analysis_graph(
 
         {
 
-            "summarize": "summarize_result",
+            "verify": "inspect_anomalies",
 
             "repair": "repair_sql",
 
@@ -112,7 +132,107 @@ def build_analysis_graph(
 
     builder.add_edge("repair_sql", "execute_sql")
 
-    builder.add_edge("summarize_result", "finalize_success")
+
+ 
+
+    builder.add_conditional_edges(
+
+        "inspect_anomalies",
+
+        nodes.route_after_anomalies,
+
+        {"verify": "review_methodology", "stop": "finalize_failure"},
+
+    )
+
+    builder.add_conditional_edges(
+
+        "review_methodology",
+
+        nodes.route_after_verifier_review,
+
+        {"query": "generate_verification_sql", "stop": "finalize_failure"},
+
+    )
+
+    builder.add_conditional_edges(
+
+        "generate_verification_sql",
+
+        nodes.route_after_verification_candidate,
+
+        {
+
+            "execute": "execute_verification_sql",
+
+            "repair": "repair_verification_sql",
+
+            "stop": "finalize_failure",
+
+        },
+
+    )
+
+    builder.add_conditional_edges(
+
+        "execute_verification_sql",
+
+        nodes.route_after_verifier_execution,
+
+        {
+
+            "reconcile": "reconcile_results",
+
+            "repair": "repair_verification_sql",
+
+            "stop": "finalize_failure",
+
+        },
+
+    )
+
+    builder.add_conditional_edges(
+
+        "repair_verification_sql",
+
+        nodes.route_after_verification_candidate,
+
+        {
+
+            "execute": "execute_verification_sql",
+
+            "repair": "repair_verification_sql",
+
+            "stop": "finalize_failure",
+
+        },
+
+    )
+
+    builder.add_conditional_edges(
+
+        "reconcile_results",
+
+        nodes.route_after_reconciliation,
+
+        {
+
+            "claims": "build_claim_ledger",
+
+            "repair": "repair_analyst_from_verifier",
+
+            "stop": "finalize_failure",
+
+        },
+
+    )
+
+    builder.add_edge("repair_analyst_from_verifier", "execute_sql")
+
+    builder.add_edge("build_claim_ledger", "finalize_success")
+
+
+ 
 
     builder.add_edge("finalize_success", END)
 

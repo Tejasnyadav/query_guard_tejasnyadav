@@ -14,7 +14,17 @@ from app.api.dependencies import get_audit_repository, get_query_service, get_sq
 
 from app.db.audit_repository import AuditRepository
 
-from app.schemas.query import ExecuteSqlRequest, QueryExecutionOutcome, ValidateSqlRequest
+from app.schemas.query import (
+
+    DirectExecuteSqlRequest,
+
+    ExecuteSqlRequest,
+
+    QueryExecutionOutcome,
+
+    ValidateSqlRequest,
+
+)
 
 from app.services.query_service import QueryService
 
@@ -51,7 +61,7 @@ def validate_query(
 
 def execute_query(
 
-    payload: ExecuteSqlRequest,
+    payload: DirectExecuteSqlRequest,
 
     http_request: Request,
 
@@ -63,7 +73,11 @@ def execute_query(
 
         raise HTTPException(status_code=403, detail="The query execution API is disabled.")
 
-    return service.execute(payload)
+    return service.execute(
+
+        ExecuteSqlRequest(**payload.model_dump(), query_role="manual")
+
+    )
 
 
 

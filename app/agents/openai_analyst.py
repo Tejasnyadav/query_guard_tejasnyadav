@@ -8,9 +8,6 @@ from typing import Any, TypeVar
 
 from uuid import UUID
 
-import os
-from langsmith import tracing_context
-
 
  
 
@@ -61,6 +58,8 @@ class OpenAIAnalyst:
         "generate_sql": "generate_sql.v1",
 
         "repair_sql": "repair_sql.v1",
+
+        "repair_from_verifier": "repair_from_verifier.v1",
 
         "summarize_result": "summarize_result.v1",
 
@@ -188,6 +187,27 @@ class OpenAIAnalyst:
 
  
 
+    def repair_from_verifier(
+
+        self, *, run_id: UUID, payload: dict[str, Any]
+
+    ) -> SQLCandidate:
+
+        return self._invoke(
+
+            run_id=run_id,
+
+            node_name="repair_from_verifier",
+
+            schema=SQLCandidate,
+
+            payload=payload,
+
+        )
+
+
+ 
+
     def summarize(self, *, run_id: UUID, payload: dict[str, Any]) -> DraftSummary:
 
         return self._invoke(
@@ -226,10 +246,6 @@ class OpenAIAnalyst:
         input_hash = sha256_json(payload)
 
         started = perf_counter()
-
-        print("LANGSMITH_TRACING:", os.getenv("LANGSMITH_TRACING"))
-        print("LANGSMITH_PROJECT:", os.getenv("LANGSMITH_PROJECT"))
-        print("LANGSMITH_API_KEY configured:", bool(os.getenv("LANGSMITH_API_KEY")))
 
         structured_model = self.model.with_structured_output(
 
@@ -493,6 +509,8 @@ class OpenAIAnalyst:
             "generate_sql": "generate_sql.md",
 
             "repair_sql": "repair_sql.md",
+
+            "repair_from_verifier": "repair_from_verifier.md",
 
             "summarize_result": "summarize_result.md",
 

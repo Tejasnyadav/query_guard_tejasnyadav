@@ -43,6 +43,29 @@ class AnalysisState(TypedDict, total=False):
 
  
 
+    anomaly_report: dict[str, Any]
+
+    verification_plan: dict[str, Any]
+
+    verification_sql_candidate: dict[str, Any]
+
+    verification_candidate_error: dict[str, Any] | None
+
+    verification_sql_repair_attempts: int
+
+    verification_query_outcome: dict[str, Any]
+
+    reconciliation: dict[str, Any]
+
+    verification_repair_attempts: int
+
+    claim_ledger: dict[str, Any]
+
+    verified_answer: dict[str, Any]
+
+
+ 
+
     status: str
 
     error_code: str | None

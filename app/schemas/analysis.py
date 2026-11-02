@@ -59,6 +59,20 @@ class AnalysisOutcome(BaseModel):
 
     draft_summary: dict[str, Any] | None = None
 
+    anomaly_report: dict[str, Any] | None = None
+
+    verification_plan: dict[str, Any] | None = None
+
+    verification_sql_candidate: dict[str, Any] | None = None
+
+    verification_query_outcome: dict[str, Any] | None = None
+
+    reconciliation: dict[str, Any] | None = None
+
+    claim_ledger: dict[str, Any] | None = None
+
+    verified_answer: dict[str, Any] | None = None
+
     error_code: str | None = None
 
     error_message: str | None = None

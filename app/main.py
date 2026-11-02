@@ -5,8 +5,6 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 load_dotenv()
-
-
  
 
 from fastapi import FastAPI, Request
@@ -19,6 +17,8 @@ from langgraph.checkpoint.postgres import PostgresSaver
  
 
 from app.agents.openai_analyst import OpenAIAnalyst
+
+from app.agents.openai_verifier import OpenAIVerifier
 
 from app.api.routes.analyses import router as analysis_router
 
@@ -41,6 +41,8 @@ from app.db.pools import create_database_pools
 from app.graph.builder import build_analysis_graph
 
 from app.graph.nodes.analysis_nodes import AnalysisNodeDependencies
+
+from app.provenance.claims import ClaimLedgerBuilder
 
 from app.services.analysis_service import AnalysisService
 
@@ -105,6 +107,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     analyst = OpenAIAnalyst(settings=settings, audit_repository=audit_repository)
 
+    verifier = OpenAIVerifier(settings=settings, audit_repository=audit_repository)
+
+    claim_builder = ClaimLedgerBuilder(
+
+        catalog=semantic_catalog,
+
+        audit_repository=audit_repository,
+
+    )
+
 
  
 
@@ -126,13 +138,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
                 analyst=analyst,
 
+                verifier=verifier,
+
                 query_service=query_service,
+
+                claim_builder=claim_builder,
 
                 audit=audit_repository,
 
                 sql_policy=policy,
 
                 max_sql_repair_attempts=settings.max_sql_repair_attempts,
+
+                max_verifier_sql_repair_attempts=(
+
+                    settings.max_verifier_sql_repair_attempts
+
+                ),
+
+                max_verification_repair_attempts=(
+
+                    settings.max_verification_repair_attempts
+
+                ),
+
+                max_verification_checks=settings.max_verification_checks,
 
             ),
 
@@ -173,6 +203,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         app.state.openai_analyst = analyst
 
+        app.state.openai_verifier = verifier
+
+        app.state.claim_builder = claim_builder
+
         app.state.analysis_graph = graph
 
         app.state.analysis_service = analysis_service
@@ -198,13 +232,13 @@ app = FastAPI(
 
     title="QueryGuard",
 
-    version="0.3.0",
+    version="0.4.0",
 
     description=(
 
-        "Phase 3 LangGraph Analyst workflow using structured OpenAI outputs and the "
+        "Phase 4 Analyst and independent Verifier workflow with deterministic "
 
-        "Phase 2 deterministic SQL safety service."
+        "reconciliation and source-linked claims."
 
     ),
 
